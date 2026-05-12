@@ -38,6 +38,7 @@ class ShiftFlow(StatesGroup):
     photo_before = State()
     geo_end = State()
     photo_after = State()
+    punch_list = State()
     notes = State()
 
 class TaskCreate(StatesGroup):
@@ -223,12 +224,13 @@ async def shift_geo_end(message: Message, state: FSMContext) -> None:
     async with async_session_factory() as s:
         shift = await ShiftRepo(s).get_by_id(data["shift_id"])
         shift = await ShiftRepo(s).end(shift, lat, lon)
-    if data.get("role") == "installer":
-        await state.set_state(ShiftFlow.photo_after)
-        await message.answer("✅ Геолокация подтверждена.\n\n📸 <b>Фото объекта ПОСЛЕ работ:</b>", parse_mode="HTML", reply_markup=kb_remove())
-    else:
-        await state.set_state(ShiftFlow.notes)
-        await message.answer("📝 Добавь заметку по смене (или /skip):", reply_markup=kb_remove())
+    # Все роли обязаны отправить фото после работы
+    await state.set_state(ShiftFlow.photo_after)
+    await message.answer(
+        "✅ Геолокация подтверждена.\n\n"
+        "📸 <b>Отправь фото выполненной работы:</b>\n"
+        "(обязательно)",
+        parse_mode="HTML", reply_markup=kb_remove())
 
 @router.message(ShiftFlow.photo_after, F.photo)
 async def shift_photo_after(message: Message, state: FSMContext) -> None:
@@ -237,8 +239,21 @@ async def shift_photo_after(message: Message, state: FSMContext) -> None:
         shift = await ShiftRepo(s).get_by_id(data["shift_id"])
         shift.photos_after = message.photo[-1].file_id
         s.add(shift)
-    await state.set_state(ShiftFlow.notes)
-    await message.answer("📝 Добавь заметку (или /skip):")
+        await s.commit()
+    await state.set_state(ShiftFlow.punch_list)
+    await message.answer(
+        "✅ Фото сохранено!\n\n"
+        "📋 <b>Punch List</b> — опиши что было сделано:\n"
+        "• Что установлено\n"
+        "• Что осталось\n"
+        "• Проблемы если были\n\n"
+        "(или /skip)",
+        parse_mode="HTML")
+
+@router.message(ShiftFlow.punch_list, F.text)
+async def shift_punch_list(message: Message, state: FSMContext) -> None:
+    notes = None if message.text == "/skip" else message.text
+    await _finish_shift(message, state, notes)
 
 @router.message(ShiftFlow.notes)
 async def shift_notes(message: Message, state: FSMContext) -> None:
@@ -249,6 +264,8 @@ async def shift_notes(message: Message, state: FSMContext) -> None:
 async def skip_cmd(message: Message, state: FSMContext) -> None:
     current = await state.get_state()
     if current == ShiftFlow.notes.state:
+        await _finish_shift(message, state, None)
+    elif current == ShiftFlow.punch_list.state:
         await _finish_shift(message, state, None)
     elif current == AddObject.client.state:
         await add_object_client(message, state)
@@ -269,15 +286,35 @@ async def _finish_shift(message, state, notes):
     user = await get_user(message.from_user.id)
     async with async_session_factory() as s:
         shift = await ShiftRepo(s).get_by_id(data["shift_id"])
+    # Считаем часы за сегодня
+    today = date.today()
+    async with async_session_factory() as s:
+        hours_today = await ShiftRepo(s).total_hours(user.id, today, today)
+        hours_week = await ShiftRepo(s).total_hours(
+            user.id, today - timedelta(days=today.weekday()), today
+        )
+
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+    kb_after = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="📊 Часы за неделю", callback_data="hours_week_after")
+    ]])
+
+    punch_text = f"\n📋 Punch list: {notes}" if notes else ""
     await message.answer(
-        f"✅ <b>Смена завершена!</b>\n\n🏗 {obj.name}\n"
+        f"✅ <b>Смена завершена!</b>\n\n"
+        f"🏗 {obj.name}\n"
         f"⏰ {shift.started_at.strftime('%H:%M')} → {shift.ended_at.strftime('%H:%M')}\n"
-        f"⏱ Итого: <b>{float(shift.total_hours):.1f} ч.</b>",
-        parse_mode="HTML", reply_markup=main_kb(user.role))
+        f"⏱ Смена: <b>{float(shift.total_hours):.1f} ч.</b>\n"
+        f"📅 Сегодня итого: <b>{hours_today:.1f} ч.</b>"
+        f"{punch_text}",
+        parse_mode="HTML",
+        reply_markup=main_kb(user.role))
+    await message.answer("Хочешь посмотреть часы за неделю?", reply_markup=kb_after)
     await notify_owner(message.bot,
         f"🔴 <b>{user.full_name}</b> завершил смену\n📍 {obj.name}\n"
         f"⏱ {float(shift.total_hours):.1f} ч.\n"
-        f"{'📸 Фото: ✅' if shift.photos_after else '📸 Фото: —'}")
+        f"{'📸 Фото: ✅' if shift.photos_after else '📸 Фото: —'}"
+        f"{punch_text}")
 
 @router.message(F.text == "📋 Мои задачи")
 async def my_tasks(message: Message) -> None:
@@ -566,6 +603,30 @@ async def daily_report(message: Message) -> None:
 async def cancel(callback: CallbackQuery, state: FSMContext) -> None:
     await state.clear()
     await callback.message.edit_text("❌ Отменено.")
+    await callback.answer()
+
+@router.callback_query(F.data == "hours_week_after")
+async def hours_week_after(callback: CallbackQuery) -> None:
+    user = await get_user(callback.from_user.id)
+    today = date.today()
+    async with async_session_factory() as s:
+        hw = await ShiftRepo(s).total_hours(
+            user.id, today - timedelta(days=today.weekday()), today
+        )
+        shifts = await ShiftRepo(s).get_by_employee(
+            user.id, today - timedelta(days=today.weekday()), today, limit=7
+        )
+    lines = ""
+    for sh in shifts:
+        h = float(sh.total_hours or 0)
+        name = sh.site_object.name if sh.site_object else "—"
+        lines += f"\n• {sh.started_at.strftime('%d.%m')} {sh.started_at.strftime('%H:%M')}–{sh.ended_at.strftime('%H:%M') if sh.ended_at else '...'} {name} — {h:.1f} ч."
+    await callback.message.edit_text(
+        f"📊 <b>Часы за неделю</b>\n\n"
+        f"Итого: <b>{hw:.1f} ч.</b>\n"
+        f"Смен: {len(shifts)}"
+        f"{lines}",
+        parse_mode="HTML")
     await callback.answer()
 
 @router.callback_query(F.data == "back_employees")

@@ -57,17 +57,17 @@ def generate_daily_report(report_date: date, shifts_data: List[dict]) -> bytes:
 
     # Header
     story.append(Paragraph("FCS — Florida Cabinet Studio", title_style))
-    story.append(Paragraph(f"Отчёт за {report_date.strftime('%d.%m.%Y')}", subtitle_style))
+    story.append(Paragraph(f"Daily Report {report_date.strftime('%d.%m.%Y')}", subtitle_style))
     story.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor("#1A5276")))
     story.append(Spacer(1, 0.4*cm))
 
     if not shifts_data:
-        story.append(Paragraph("Смен за этот день не найдено.", value_style))
+        story.append(Paragraph("No shifts found for this day.", value_style))
     else:
         # Summary table
         total_hours = sum(float(s.get("hours") or 0) for s in shifts_data)
         summary_data = [
-            ["Всего смен", "Суммарно часов", "Сотрудников"],
+            ["Total Shifts", "Total Hours", "Employees"],
             [str(len(shifts_data)), f"{total_hours:.1f} ч.", str(len({s["employee"] for s in shifts_data}))],
         ]
         summary_table = Table(summary_data, colWidths=[5.5*cm, 5.5*cm, 5.5*cm])
@@ -87,7 +87,7 @@ def generate_daily_report(report_date: date, shifts_data: List[dict]) -> bytes:
         story.append(Spacer(1, 0.5*cm))
 
         # Detail table
-        headers = ["Сотрудник", "Объект", "Начало", "Конец", "Часов", "Фото до", "Фото после"]
+        headers = ["Employee", "Object", "Start", "End", "Hours", "Photo Before", "Photo After"]
         table_data = [headers]
         for s in shifts_data:
             table_data.append([
@@ -120,7 +120,7 @@ def generate_daily_report(report_date: date, shifts_data: List[dict]) -> bytes:
         has_notes = any(s.get("notes") for s in shifts_data)
         if has_notes:
             story.append(Spacer(1, 0.5*cm))
-            story.append(Paragraph("Заметки:", ParagraphStyle("h", parent=styles["Heading3"], fontSize=11)))
+            story.append(Paragraph("Notes:", ParagraphStyle("h", parent=styles["Heading3"], fontSize=11)))
             for s in shifts_data:
                 if s.get("notes"):
                     story.append(Paragraph(
@@ -131,7 +131,7 @@ def generate_daily_report(report_date: date, shifts_data: List[dict]) -> bytes:
     story.append(Spacer(1, 1*cm))
     story.append(HRFlowable(width="100%", thickness=0.5, color=colors.gray))
     story.append(Paragraph(
-        f"Сформировано: {date.today().strftime('%d.%m.%Y')} | FCS Bot",
+        f"Generated: {date.today().strftime('%d.%m.%Y')} | FCS Bot",
         ParagraphStyle("footer", parent=styles["Normal"], fontSize=8,
                        textColor=colors.gray, alignment=TA_CENTER)
     ))
