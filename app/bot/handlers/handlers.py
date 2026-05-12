@@ -49,6 +49,7 @@ class TaskComplete(StatesGroup):
 
 async def get_user(telegram_id: int):
     async with async_session_factory() as s:
+        await s.commit()  # ensure clean state
         return await UserRepo(s).get_by_telegram_id(telegram_id)
 
 async def notify_owner(bot: Bot, text: str) -> None:
@@ -84,26 +85,36 @@ async def reg_last_name(message: Message, state: FSMContext) -> None:
         await message.answer("Введи фамилию (минимум 2 символа):")
         return
     data = await state.get_data()
+    first_name = data["first_name"]
+    last_name = message.text.strip()
+    from app.models.models import User as UserModel
     async with async_session_factory() as s:
         repo = UserRepo(s)
         user = await repo.get_by_telegram_id(message.from_user.id)
         if user:
-            user.first_name = data["first_name"]
-            user.last_name = message.text.strip()
-            user = await repo.save(user)
+            user.first_name = first_name
+            user.last_name = last_name
+            s.add(user)
         else:
-            user = await repo.create(
+            user = UserModel(
                 telegram_id=message.from_user.id,
-                first_name=data["first_name"],
-                last_name=message.text.strip(),
-                username=message.from_user.username,
+                first_name=first_name,
+                last_name=last_name,
+                telegram_username=message.from_user.username,
                 role="installer",
+                is_active=True,
             )
+            s.add(user)
+        await s.commit()
+        await s.refresh(user)
+        full_name = user.full_name
+        role = user.role
+        role_badge = user.role_badge
     await state.clear()
     await message.answer(
-        f"✅ Готово, <b>{user.full_name}</b>!\n{user.role_badge}",
-        parse_mode="HTML", reply_markup=main_kb(user.role))
-    await notify_owner(message.bot, f"👤 Новый сотрудник:\n<b>{user.full_name}</b>\n@{message.from_user.username or chr(8212)}")
+        f"✅ Готово, <b>{full_name}</b>!\n{role_badge}",
+        parse_mode="HTML", reply_markup=main_kb(role))
+    await notify_owner(message.bot, f"👤 Новый сотрудник:\n<b>{full_name}</b>\n@{message.from_user.username or chr(8212)}")
 
 @router.message(F.text == "🟢 Начать смену")
 async def shift_start(message: Message, state: FSMContext) -> None:
@@ -148,7 +159,10 @@ async def shift_geo_start(message: Message, state: FSMContext) -> None:
     async with async_session_factory() as s:
         user = await UserRepo(s).get_by_telegram_id(message.from_user.id)
         shift = await ShiftRepo(s).start(user.id, obj.id, lat, lon)
-    await state.update_data(shift_id=shift.id)
+        await s.commit()
+        shift_id = shift.id
+        started_at = shift.started_at
+    await state.update_data(shift_id=shift_id)
     if data.get("role") == "installer":
         await state.set_state(ShiftFlow.photo_before)
         await message.answer(

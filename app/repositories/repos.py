@@ -41,6 +41,7 @@ class UserRepo:
             last_name=last_name,
             telegram_username=username,
             role=role,
+            is_active=True,
         )
         self.s.add(user)
         await self.s.flush()
@@ -52,6 +53,9 @@ class UserRepo:
         await self.s.flush()
         await self.s.refresh(user)
         return user
+
+    async def commit(self) -> None:
+        await self.s.commit()
 
 
 class ObjectRepo:
