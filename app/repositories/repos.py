@@ -191,7 +191,6 @@ class TaskRepo:
     async def get_all_created_by(self, creator_id: int) -> Sequence[Task]:
         r = await self.s.execute(
             select(Task)
-            .options(selectinload(Task.assignee))
             .where(Task.creator_id == creator_id)
             .order_by(Task.created_at.desc())
             .limit(20)

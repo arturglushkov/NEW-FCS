@@ -138,10 +138,9 @@ def kb_my_tasks_owner(tasks: Sequence) -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
     for t in tasks:
         status = "✅" if t.status == "done" else "⏳"
-        assignee = t.assignee.full_name if t.assignee else "—"
         b.row(InlineKeyboardButton(
-            text=f"{status} {t.title[:30]} → {assignee}",
-            callback_data=f"task_owner:{t.id}",
+            text=f"{status} {t.title[:40]}",
+            callback_data=f"task:{t.id}",
         ))
     return b.as_markup()
 
