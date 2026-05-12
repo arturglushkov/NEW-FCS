@@ -250,6 +250,10 @@ async def skip_cmd(message: Message, state: FSMContext) -> None:
     current = await state.get_state()
     if current == ShiftFlow.notes.state:
         await _finish_shift(message, state, None)
+    elif current == AddObject.client.state:
+        await add_object_client(message, state)
+    elif current == TaskCreate.description.state:
+        await task_description(message, state)
 
 async def _finish_shift(message, state, notes):
     data = await state.get_data()
@@ -438,7 +442,7 @@ async def add_object_lon(message: Message, state: FSMContext) -> None:
     except ValueError:
         await message.answer("❌ Введи число. Пример: -80.1426")
 
-@router.message(AddObject.client)
+@router.message(AddObject.client, F.text)
 async def add_object_client(message: Message, state: FSMContext) -> None:
     data = await state.get_data()
     client = None if message.text == "/skip" else message.text.strip()
@@ -514,7 +518,7 @@ async def task_title(message: Message, state: FSMContext) -> None:
     await message.answer("📝 Описание (или /skip):")
     await state.set_state(TaskCreate.description)
 
-@router.message(TaskCreate.description)
+@router.message(TaskCreate.description, F.text)
 async def task_description(message: Message, state: FSMContext) -> None:
     data = await state.get_data()
     description = None if message.text == "/skip" else message.text.strip()
