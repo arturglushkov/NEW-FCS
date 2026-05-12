@@ -17,9 +17,11 @@ def kb_remove() -> ReplyKeyboardRemove:
 
 def kb_owner() -> ReplyKeyboardMarkup:
     b = ReplyKeyboardBuilder()
+    b.row(KeyboardButton(text="🟢 Начать смену"), KeyboardButton(text="🔴 Завершить смену"))
     b.row(KeyboardButton(text="👥 Сотрудники"), KeyboardButton(text="🏗 Объекты"))
     b.row(KeyboardButton(text="📋 Задачи"), KeyboardButton(text="📊 Отчёт за день"))
-    b.row(KeyboardButton(text="➕ Добавить объект"), KeyboardButton(text="➕ Добавить сотрудника"))
+    b.row(KeyboardButton(text="⏱ Мои часы"), KeyboardButton(text="➕ Добавить объект"))
+    b.row(KeyboardButton(text="➕ Добавить сотрудника"))
     return b.as_markup(resize_keyboard=True)
 
 
