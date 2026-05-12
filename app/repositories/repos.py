@@ -80,15 +80,17 @@ class ObjectRepo:
             name=name, address=address, latitude=lat, longitude=lon,
             client_name=client_name, object_type=object_type,
             created_by_id=created_by_id, notes=notes,
+            status="active",
         )
         self.s.add(obj)
-        await self.s.flush()
+        await self.s.commit()
         await self.s.refresh(obj)
         return obj
 
     async def save(self, obj: SiteObject) -> SiteObject:
         self.s.add(obj)
-        await self.s.flush()
+        await self.s.commit()
+        await self.s.refresh(obj)
         return obj
 
 
@@ -142,7 +144,7 @@ class ShiftRepo:
             start_lon=lon,
         )
         self.s.add(shift)
-        await self.s.flush()
+        await self.s.commit()
         await self.s.refresh(shift)
         return shift
 
@@ -210,7 +212,7 @@ class TaskRepo:
             site_object_id=site_object_id,
         )
         self.s.add(task)
-        await self.s.flush()
+        await self.s.commit()
         await self.s.refresh(task)
         return task
 

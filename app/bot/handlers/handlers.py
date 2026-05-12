@@ -444,10 +444,14 @@ async def add_object_client(message: Message, state: FSMContext) -> None:
     client = None if message.text == "/skip" else message.text.strip()
     user = await get_user(message.from_user.id)
     async with async_session_factory() as s:
-        obj = await ObjectRepo(s).create(name=data["name"], address=data["address"], lat=data["lat"], lon=data["lon"], client_name=client, created_by_id=user.id)
+        repo = ObjectRepo(s)
+        obj = await repo.create(name=data["name"], address=data["address"], lat=data["lat"], lon=data["lon"], client_name=client, created_by_id=user.id)
+        obj_name = obj.name
+        obj_address = obj.address
+        obj_client = obj.client_name
     await state.clear()
     await message.answer(
-        f"✅ <b>Объект создан!</b>\n\n🏗 {obj.name}\n📍 {obj.address}\n👤 {obj.client_name or '—'}",
+        f"✅ <b>Объект создан!</b>\n\n🏗 {obj_name}\n📍 {obj_address}\n👤 {obj_client or '—'}",
         parse_mode="HTML", reply_markup=main_kb(user.role))
 
 @router.message(F.text == "👥 Сотрудники")
