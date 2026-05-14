@@ -308,24 +308,46 @@ async def skip_cmd(message: Message, state: FSMContext) -> None:
 async def _finish_shift(message, state, notes):
     data = await state.get_data()
     if not data.get("shift_id"):
+        await state.clear()
         return
+    user = await get_user(message.from_user.id)
+    if not user:
+        await state.clear()
+        return
+
+    # Сохраняем notes и закрываем смену если ещё не закрыта
     async with async_session_factory() as s:
         shift = await ShiftRepo(s).get_by_id(data["shift_id"])
+        if not shift:
+            await state.clear()
+            await message.answer("⚠️ Смена не найдена.", reply_markup=main_kb(user.role))
+            return
         if notes:
             shift.notes = notes
             s.add(shift)
+        # Закрываем смену если ещё активна
+        if shift.status != "completed":
+            now = datetime.now(timezone.utc)
+            shift.ended_at = now
+            shift.status = "completed"
+            hours = (now - shift.started_at).total_seconds() / 3600
+            shift.total_hours = round(hours, 2)
+            s.add(shift)
+        await s.commit()
         obj = await ObjectRepo(s).get_by_id(shift.site_object_id)
+        # Сохраняем все нужные значения
+        started_str = shift.started_at.strftime('%H:%M') if shift.started_at else "—"
+        ended_str = shift.ended_at.strftime('%H:%M') if shift.ended_at else "—"
+        total_hours = float(shift.total_hours or 0)
+        has_photo = bool(shift.photos_after)
+        obj_name = obj.name if obj else "—"
+
     await state.clear()
-    user = await get_user(message.from_user.id)
-    async with async_session_factory() as s:
-        shift = await ShiftRepo(s).get_by_id(data["shift_id"])
+
     # Считаем часы за сегодня
     today = date.today()
     async with async_session_factory() as s:
         hours_today = await ShiftRepo(s).total_hours(user.id, today, today)
-        hours_week = await ShiftRepo(s).total_hours(
-            user.id, today - timedelta(days=today.weekday()), today
-        )
 
     from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
     kb_after = InlineKeyboardMarkup(inline_keyboard=[[
@@ -334,20 +356,20 @@ async def _finish_shift(message, state, notes):
 
     punch_text = f"\n\n📋 <b>Отчёт:</b>\n{notes}" if notes else ""
     await message.answer(
-        f"✅ <b>Смена завершена!</b>\n"
-        f"🙏 Спасибо за работу!\n\n"
-        f"🏗 {obj.name}\n"
-        f"⏰ {shift.started_at.strftime('%H:%M')} → {shift.ended_at.strftime('%H:%M')}\n"
-        f"⏱ Смена: <b>{float(shift.total_hours):.1f} ч.</b>\n"
+        f"🎉 <b>Смена завершена!</b>\n"
+        f"🙏 Спасибо за работу, {user.first_name}!\n\n"
+        f"🏗 {obj_name}\n"
+        f"⏰ {started_str} → {ended_str}\n"
+        f"⏱ Смена: <b>{total_hours:.1f} ч.</b>\n"
         f"📅 Сегодня итого: <b>{hours_today:.1f} ч.</b>"
         f"{punch_text}",
         parse_mode="HTML",
         reply_markup=main_kb(user.role))
     await message.answer("Хочешь посмотреть часы за неделю?", reply_markup=kb_after)
     await notify_owner(message.bot,
-        f"🔴 <b>{user.full_name}</b> завершил смену\n📍 {obj.name}\n"
-        f"⏱ {float(shift.total_hours):.1f} ч.\n"
-        f"{'📸 Фото: ✅' if shift.photos_after else '📸 Фото: —'}"
+        f"🔴 <b>{user.full_name}</b> завершил смену\n📍 {obj_name}\n"
+        f"⏱ {total_hours:.1f} ч.\n"
+        f"{'📸 Фото: ✅' if has_photo else '📸 Фото: —'}"
         f"{punch_text}")
 
 @router.message(F.text == "📋 Мои задачи")
