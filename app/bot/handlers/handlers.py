@@ -38,7 +38,9 @@ class ShiftFlow(StatesGroup):
     photo_before = State()
     geo_end = State()
     photo_after = State()
-    punch_list = State()
+    installed = State()
+    remaining = State()
+    problems = State()
     notes = State()
 
 class TaskCreate(StatesGroup):
@@ -240,19 +242,46 @@ async def shift_photo_after(message: Message, state: FSMContext) -> None:
         shift.photos_after = message.photo[-1].file_id
         s.add(shift)
         await s.commit()
-    await state.set_state(ShiftFlow.punch_list)
+    await state.set_state(ShiftFlow.installed)
     await message.answer(
         "✅ Фото сохранено!\n\n"
-        "📋 <b>Punch List</b> — опиши что было сделано:\n"
-        "• Что установлено\n"
-        "• Что осталось\n"
-        "• Проблемы если были\n\n"
+        "1️⃣ <b>Что установлено?</b>\n"
         "(или /skip)",
         parse_mode="HTML")
 
-@router.message(ShiftFlow.punch_list, F.text)
-async def shift_punch_list(message: Message, state: FSMContext) -> None:
-    notes = None if message.text == "/skip" else message.text
+@router.message(ShiftFlow.installed, F.text)
+async def shift_installed(message: Message, state: FSMContext) -> None:
+    installed = None if message.text == "/skip" else message.text.strip()
+    await state.update_data(installed=installed)
+    await state.set_state(ShiftFlow.remaining)
+    await message.answer(
+        "2️⃣ <b>Что осталось доделать?</b>\n"
+        "(или /skip)",
+        parse_mode="HTML")
+
+@router.message(ShiftFlow.remaining, F.text)
+async def shift_remaining(message: Message, state: FSMContext) -> None:
+    remaining = None if message.text == "/skip" else message.text.strip()
+    await state.update_data(remaining=remaining)
+    await state.set_state(ShiftFlow.problems)
+    await message.answer(
+        "3️⃣ <b>Были ли проблемы?</b>\n"
+        "(или /skip)",
+        parse_mode="HTML")
+
+@router.message(ShiftFlow.problems, F.text)
+async def shift_problems(message: Message, state: FSMContext) -> None:
+    problems = None if message.text == "/skip" else message.text.strip()
+    data = await state.get_data()
+    # Собираем все три части в один текст
+    parts = []
+    if data.get("installed"):
+        parts.append(f"✅ Установлено: {data['installed']}")
+    if data.get("remaining"):
+        parts.append(f"⏳ Осталось: {data['remaining']}")
+    if problems:
+        parts.append(f"⚠️ Проблемы: {problems}")
+    notes = "\n".join(parts) if parts else None
     await _finish_shift(message, state, notes)
 
 @router.message(ShiftFlow.notes)
@@ -265,8 +294,12 @@ async def skip_cmd(message: Message, state: FSMContext) -> None:
     current = await state.get_state()
     if current == ShiftFlow.notes.state:
         await _finish_shift(message, state, None)
-    elif current == ShiftFlow.punch_list.state:
-        await _finish_shift(message, state, None)
+    elif current == ShiftFlow.installed.state:
+        await shift_installed(message, state)
+    elif current == ShiftFlow.remaining.state:
+        await shift_remaining(message, state)
+    elif current == ShiftFlow.problems.state:
+        await shift_problems(message, state)
     elif current == AddObject.client.state:
         await add_object_client(message, state)
     elif current == TaskCreate.description.state:
@@ -299,9 +332,10 @@ async def _finish_shift(message, state, notes):
         InlineKeyboardButton(text="📊 Часы за неделю", callback_data="hours_week_after")
     ]])
 
-    punch_text = f"\n📋 Punch list: {notes}" if notes else ""
+    punch_text = f"\n\n📋 <b>Отчёт:</b>\n{notes}" if notes else ""
     await message.answer(
-        f"✅ <b>Смена завершена!</b>\n\n"
+        f"✅ <b>Смена завершена!</b>\n"
+        f"🙏 Спасибо за работу!\n\n"
         f"🏗 {obj.name}\n"
         f"⏰ {shift.started_at.strftime('%H:%M')} → {shift.ended_at.strftime('%H:%M')}\n"
         f"⏱ Смена: <b>{float(shift.total_hours):.1f} ч.</b>\n"
