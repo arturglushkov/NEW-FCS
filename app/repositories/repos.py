@@ -1,5 +1,5 @@
 from __future__ import annotations
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 from typing import Optional, Sequence
 from sqlalchemy import select, update, func
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -111,7 +111,7 @@ class ShiftRepo:
         return await self.s.get(Shift, sid)
 
     async def get_today_all(self) -> Sequence[Shift]:
-        today = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+        today = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
         r = await self.s.execute(
             select(Shift)
             .options(selectinload(Shift.employee), selectinload(Shift.site_object))
@@ -139,7 +139,7 @@ class ShiftRepo:
             employee_id=employee_id,
             site_object_id=site_object_id,
             status="active",
-            started_at=datetime.utcnow(),
+            started_at=datetime.now(timezone.utc),
             start_lat=lat,
             start_lon=lon,
         )
@@ -149,7 +149,7 @@ class ShiftRepo:
         return shift
 
     async def end(self, shift: Shift, lat: float, lon: float) -> Shift:
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         shift.ended_at = now
         shift.end_lat = lat
         shift.end_lon = lon
@@ -217,7 +217,7 @@ class TaskRepo:
 
     async def complete(self, task: Task, report: Optional[str] = None) -> Task:
         task.status = "done"
-        task.completed_at = datetime.utcnow()
+        task.completed_at = datetime.now(timezone.utc)
         task.report = report
         self.s.add(task)
         await self.s.flush()

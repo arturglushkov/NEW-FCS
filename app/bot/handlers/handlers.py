@@ -1,7 +1,7 @@
 """FCS Bot handlers"""
 from __future__ import annotations
 import logging
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone
 from typing import Optional
 from aiogram import Router, F, Bot
 from aiogram.filters import CommandStart, Command
@@ -204,7 +204,7 @@ async def shift_end(message: Message, state: FSMContext) -> None:
             await message.answer("❌ У тебя нет активной смены.", reply_markup=main_kb(user.role))
             return
         obj = await ObjectRepo(s).get_by_id(active.site_object_id)
-    elapsed = (datetime.utcnow() - active.started_at).total_seconds() / 3600
+    elapsed = (datetime.now(timezone.utc) - active.started_at).total_seconds() / 3600
     await state.set_state(ShiftFlow.geo_end)
     await state.update_data(shift_id=active.id, role=user.role, obj_id=active.site_object_id)
     await message.answer(
