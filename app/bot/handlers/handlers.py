@@ -335,12 +335,34 @@ async def _finish_shift(message, state, notes):
             s.add(shift)
         await s.commit()
         obj = await ObjectRepo(s).get_by_id(shift.site_object_id)
+
         # Сохраняем все нужные значения
         started_str = shift.started_at.strftime('%H:%M') if shift.started_at else "—"
         ended_str = shift.ended_at.strftime('%H:%M') if shift.ended_at else "—"
         total_hours = float(shift.total_hours or 0)
         has_photo = bool(shift.photos_after)
         obj_name = obj.name if obj else "—"
+        obj_address = obj.address if obj else "—"
+
+        # Data for PDF
+        pdf_data = {
+            "employee": user.full_name,
+            "role": user.role_badge,
+            "object": obj_name,
+            "address": obj_address,
+            "started": shift.started_at.strftime('%d.%m.%Y %H:%M') if shift.started_at else "—",
+            "ended": shift.ended_at.strftime('%d.%m.%Y %H:%M') if shift.ended_at else "—",
+            "hours": total_hours,
+            "start_lat": shift.start_lat,
+            "start_lon": shift.start_lon,
+            "end_lat": shift.end_lat,
+            "end_lon": shift.end_lon,
+            "installed": data.get("punch_installed", ""),
+            "remaining": data.get("punch_remaining", ""),
+            "problems": data.get("punch_problems", ""),
+        }
+        photo_before_id = shift.photos_before
+        photo_after_id = shift.photos_after
 
     await state.clear()
 
@@ -349,7 +371,7 @@ async def _finish_shift(message, state, notes):
     async with async_session_factory() as s:
         hours_today = await ShiftRepo(s).total_hours(user.id, today, today)
 
-    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, BufferedInputFile
     kb_after = InlineKeyboardMarkup(inline_keyboard=[[
         InlineKeyboardButton(text="📊 Часы за неделю", callback_data="hours_week_after")
     ]])
@@ -366,11 +388,48 @@ async def _finish_shift(message, state, notes):
         parse_mode="HTML",
         reply_markup=main_kb(user.role))
     await message.answer("Хочешь посмотреть часы за неделю?", reply_markup=kb_after)
+
+    # Отправляем владельцу краткое уведомление + PDF
     await notify_owner(message.bot,
         f"🔴 <b>{user.full_name}</b> завершил смену\n📍 {obj_name}\n"
         f"⏱ {total_hours:.1f} ч.\n"
         f"{'📸 Фото: ✅' if has_photo else '📸 Фото: —'}"
         f"{punch_text}")
+
+    # Генерируем и отправляем PDF владельцу
+    try:
+        from app.utils.shift_pdf import generate_shift_pdf
+
+        # Скачиваем фото из Telegram
+        photo_before_bytes = None
+        photo_after_bytes = None
+        if photo_before_id:
+            try:
+                f = await message.bot.get_file(photo_before_id)
+                buf = await message.bot.download_file(f.file_path)
+                photo_before_bytes = buf.read()
+            except Exception as e:
+                logger.warning(f"Failed to download photo_before: {e}")
+        if photo_after_id:
+            try:
+                f = await message.bot.get_file(photo_after_id)
+                buf = await message.bot.download_file(f.file_path)
+                photo_after_bytes = buf.read()
+            except Exception as e:
+                logger.warning(f"Failed to download photo_after: {e}")
+
+        pdf_bytes = generate_shift_pdf(pdf_data, photo_before_bytes, photo_after_bytes)
+
+        emp_name_safe = user.full_name.replace(" ", "_")
+        filename = f"shift_{emp_name_safe}_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf"
+
+        await message.bot.send_document(
+            chat_id=settings.OWNER_TELEGRAM_ID,
+            document=BufferedInputFile(pdf_bytes, filename=filename),
+            caption=f"📄 PDF отчёт: {user.full_name} — {obj_name}",
+        )
+    except Exception as e:
+        logger.warning(f"PDF generation failed: {e}")
 
 @router.message(F.text == "📋 Мои задачи")
 async def my_tasks(message: Message) -> None:
